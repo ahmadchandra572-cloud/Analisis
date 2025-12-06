@@ -2,8 +2,8 @@ import streamlit as st
 import joblib
 
 # Load model dan vectorizer
-model = joblib.load("model_RF_GamGwo.pkl")
-vectorizer = joblib.load("tfidf_vectorizer.pkl")
+model = joblib.load("model_LR_GamGwo.pkl")
+vectorizer = joblib.load("model_SVM_GamGwo.pkl")
 
 st.title("Aplikasi Analisis Sentimen 🇮🇩")
 st.write("Masukkan teks yang ingin dianalisis:")
