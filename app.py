@@ -2,87 +2,104 @@ import streamlit as st
 import joblib
 import re
 import string
-from Sastrawi.Stemmer.StemmerFactory import StemmerFactory # Jika ini digunakan untuk stemming
+# PENTING: Sastrawi harus diimpor untuk Stemming (perlu di list requirements.txt)
+from Sastrawi.Stemmer.StemmerFactory import StemmerFactory 
 
 # ==========================================
-# 0️⃣ PREPROCESSING FUNCTION (Wajib Ada)
+# 0️⃣ PREPROCESSING FUNCTION (Wajib Sama dengan Training)
 # ==========================================
-# (Asumsi Anda memasukkan fungsi preprocessing lengkap Anda di sini,
-# seperti yang kita bahas sebelumnya, untuk memastikan akurasi)
 @st.cache_data
 def text_preprocessing(text):
-    # --- Tempatkan seluruh logika cleaning, case folding, dan stemming di sini ---
-    # Contoh implementasi sederhana:
     if not isinstance(text, str): return ""
+    
+    # 1. Case Folding
     text = text.lower()
-    text = re.sub(r'[^a-zA-Z\s]', '', text) # Hapus simbol/angka
-    # Asumsi StemmerFactory sudah didefinisikan jika menggunakan stemming
-    # text = stemmer.stem(text) 
-    return text.strip()
-# ---------------------------------------------------------------------------------
-
-
-# ==========================================
-# 1️⃣ LOAD SEMUA MODEL DAN VECTORIZER (DENGAN NAMA FILE YANG BENAR)
-# ==========================================
-# Gunakan st.cache_resource agar loading hanya dilakukan sekali
-@st.cache_resource
-def load_all_models():
-    # Mengoreksi semua nama file
+    
+    # 2. Cleaning (Hapus Simbol/Angka/URL/Username)
+    text = re.sub(r'http\S+|www\S+|https\S+', '', text, flags=re.MULTILINE)
+    text = re.sub(r'@\w+','', text)
+    text = re.sub(r'\d+', '', text)
+    text = text.translate(str.maketrans('', '', string.punctuation))
+    text = text.encode('ascii', 'ignore').decode('ascii')
+    
+    # 3. Stemming (Sastrawi)
+    # Ini sering menyebabkan error di cloud, pastikan Sastrawi ada di requirements.txt
     try:
+        factory = StemmerFactory()
+        stemmer = factory.create_stemmer()
+        text = stemmer.stem(text)
+    except:
+        pass # Lewati jika Sastrawi gagal
+        
+    return text.strip()
+
+# ==========================================
+# 1️⃣ LOAD SEMUA MODEL DAN VECTORIZER
+# ==========================================
+# Menggunakan st.cache_resource agar loading file .pkl hanya 1x
+@st.cache_resource
+def load_resources():
+    try:
+        # Load 3 MODEL OPTIMASI (Menggunakan NAMA FILE YANG BENAR di repo)
         models = {
-            "Random Forest (GAM-GWO)": joblib.load("model_RF_GamGwo.pkl"),
-            "Logistic Regression (GAM-GWO)": joblib.load("model_LR_GamGwo.pkl"),
-            "Support Vector Machine (GAM-GWO)": joblib.load("model_SVM_GamGwo.pkl"),
+            "Random Forest (RF)": joblib.load("model_RF_GamGwo.pkl"),
+            "Logistic Regression (LR)": joblib.load("model_LR_GamGwo.pkl"),
+            "Support Vector Machine (SVM)": joblib.load("model_SVM_GamGwo.pkl"),
         }
-        # MEMUAT VECTORIZER DENGAN NAMA FILE YANG BENAR
+        # Load Vectorizer TF-IDF (PENTING untuk konversi teks ke angka)
         vectorizer = joblib.load("tfidf_vectorizer.pkl") 
         return models, vectorizer
     except Exception as e:
-        st.error(f"Error memuat file: Pastikan semua .pkl dan tfidf_vectorizer.pkl ada. Detail: {e}")
+        # Menampilkan error di console Streamlit jika ada masalah loading file
+        st.error(f"FATAL ERROR: Gagal memuat file .pkl. Pastikan semua model dan vectorizer terupload. Error: {e}")
         return None, None
+            
+MODELS, VECTORIZER = load_resources()
 
-# Panggil fungsi load
-MODELS, VECTORIZER = load_all_models()
 
 # ==========================================
 # 2️⃣ ANTARMUKA PENGGUNA (UI)
 # ==========================================
-st.title("Aplikasi Analisis Sentimen 🇮🇩")
-st.write("Prediksi Akurasi: RF > LR > SVM (sesuai hasil optimasi)")
+st.title("Aplikasi Analisis Sentimen DPR")
+st.subheader("Model Optimasi GAM-GWO (RF | LR | SVM)")
 
 # Pilihan Model menggunakan Selectbox
-model_choice = st.selectbox(
-    "Pilih Model untuk Prediksi:",
-    list(MODELS.keys())
-)
+model_options = list(MODELS.keys()) if MODELS else ["(Error Loading Models)"]
+model_choice = st.selectbox("Pilih Algoritma Prediksi:", model_options)
 
-input_text = st.text_area("Teks input")
+input_text = st.text_area("Masukkan Komentar YouTube di sini:", height=100)
 
 if st.button("Analisis"):
-    if MODELS is None or VECTORIZER is None:
-        st.warning("Model belum dimuat karena ada error FileNotFoundError.")
+    if MODELS is None:
+        st.stop()
         
     elif input_text.strip() == "":
         st.warning("Teks tidak boleh kosong!")
         
     else:
+        # --- PREDICTIVE LOGIC ---
+        
         # 1. Preprocessing Input
         clean_text = text_preprocessing(input_text)
         
-        # 2. Transformasi ke Angka (Menggunakan Vectorizer yang benar)
+        # 2. Vectorization (Menggunakan Vectorizer yang benar)
+        # HIDE TF-IDF complexity from user, but it's essential here.
         X = VECTORIZER.transform([clean_text])
         
-        # 3. Prediksi menggunakan model yang dipilih
+        # 3. Prediksi
         selected_model = MODELS[model_choice]
         prediction = selected_model.predict(X)[0]
 
         # 4. Tampilkan Hasil
-        st.info(f"Teks Bersih: {clean_text}")
+        st.info(f"Teks Bersih (Preprocessed): {clean_text}")
 
         if prediction == "Positif":
-            st.success("Sentimen: POSITIF 👍")
+            st.success(f"Sentimen: POSITIF 👍 (Model: {model_choice})")
         elif prediction == "Negatif":
-            st.error("Sentimen: NEGATIF 👎")
+            st.error(f"Sentimen: NEGATIF 👎 (Model: {model_choice})")
         else:
-            st.warning("Sentimen: NETRAL 😐")
+            st.warning(f"Sentimen: NETRAL 😐 (Model: {model_choice})")
+
+### **Catatan Penting (Untuk Memperbaiki ModuleNotFoundError):**
+
+Pastikan file **`requirements.txt`** Anda sudah mencakup library **`Sastrawi`** dan **`joblib`** agar Streamlit tidak *crash* lagi:
